@@ -1,57 +1,50 @@
-
 pipeline {
-    agent any 
+    agent any
 
     environment {
-        DOCKER_CREDENTIALS_ID = 'roseaw-dockerhub'
-        DOCKER_IMAGE = 'cithit/almafra'                                                 // <------change this
-        IMAGE_TAG = "build-${BUILD_NUMBER}"
-        GITHUB_URL = 'https://github.com/almafra/alitest2.git'                   // <------change this
-        KUBECONFIG = credentials('almafra-225')                                             // <------change this
+        IMAGE_NAME = "ali/cicd-example"
+        NODE_PORT = "32000"
     }
 
     stages {
-        stage('Checkout') {
+        stage('Clone Repository') {
             steps {
-                checkout([$class: 'GitSCM', branches: [[name: '*/main']],
-                          userRemoteConfigs: [[url: "${GITHUB_URL}"]]])
+                git 'https://github.com/<your-username>/<your-repo>.git'
             }
         }
 
         stage('Build Docker Image') {
             steps {
                 script {
-                    docker.build("${DOCKER_IMAGE}:${IMAGE_TAG}")
+                    sh "docker build -t $IMAGE_NAME ."
                 }
             }
         }
 
-        stage('Push Docker Image') {
+        stage('Push Image to Docker Hub') {
             steps {
-                script {
-                    docker.withRegistry('https://index.docker.io/v1/', "${DOCKER_CREDENTIALS_ID}") {
-                        docker.image("${DOCKER_IMAGE}:${IMAGE_TAG}").push()
-                    }
+                withDockerRegistry([credentialsId: 'docker-hub-credentials', url: '']) {
+                    sh "docker push $IMAGE_NAME"
                 }
             }
         }
 
-        stage('Deploy to Dev Environment using NodePort') {
+        stage('Deploy to Kubernetes') {
             steps {
                 script {
-                    // Set up Kubernetes configuration using the specified KUBECONFIG
-                    def kubeConfig = readFile(KUBECONFIG)
-                    // Update deployment-dev.yaml to use the new image tag
-                    sh "sed -i 's|${DOCKER_IMAGE}:latest|${DOCKER_IMAGE}:${IMAGE_TAG}|' deployment.yaml"
-                    sh "kubectl apply -f deployment.yaml"
+                    sh """
+                    kubectl apply -f k8s/deployment.yaml
+                    kubectl apply -f k8s/service.yaml
+                    """
                 }
             }
         }
- 
-        stage('Check Kubernetes Cluster') {
+
+        stage('Verify Deployment') {
             steps {
                 script {
-                    sh "kubectl get all"
+                    sh "kubectl get pods"
+                    sh "kubectl get services"
                 }
             }
         }
