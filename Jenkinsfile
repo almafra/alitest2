@@ -1,50 +1,56 @@
 pipeline {
-    agent any
+    agent any 
 
     environment {
-        IMAGE_NAME = "ali/cicd-example"
-        NODE_PORT = "32000"
+        DOCKER_CREDENTIALS_ID = 'roseaw-dockerhub'
+        DOCKER_IMAGE = 'cithit/almafra'                                                 // <------change this
+        IMAGE_TAG = "build-${BUILD_NUMBER}"
+        GITHUB_URL = 'https://github.com/almafra/alitest2.git'                   // <------change this
+        KUBECONFIG = credentials('almafra-225')                                             // <------change this
     }
 
     stages {
-        stage('Clone Repository') {
+        stage('Checkout') {
             steps {
-                git 'https://github.com/<your-username>/<your-repo>.git'
+                checkout([$class: 'GitSCM', branches: [[name: '*/main']],
+                          userRemoteConfigs: [[url: "${GITHUB_URL}"]]])
             }
         }
 
         stage('Build Docker Image') {
             steps {
                 script {
-                    sh "docker build -t $IMAGE_NAME ."
+                    docker.build("${DOCKER_IMAGE}:${IMAGE_TAG}")
                 }
             }
         }
 
-        stage('Push Image to Docker Hub') {
-            steps {
-                withDockerRegistry([credentialsId: 'docker-hub-credentials', url: '']) {
-                    sh "docker push $IMAGE_NAME"
-                }
-            }
-        }
-
-        stage('Deploy to Kubernetes') {
+        stage('Push Docker Image') {
             steps {
                 script {
-                    sh """
-                    kubectl apply -f k8s/deployment.yaml
-                    kubectl apply -f k8s/service.yaml
-                    """
+                    docker.withRegistry('https://index.docker.io/v1/', "${DOCKER_CREDENTIALS_ID}") {
+                        docker.image("${DOCKER_IMAGE}:${IMAGE_TAG}").push()
+                    }
                 }
             }
         }
 
-        stage('Verify Deployment') {
+        stage('Deploy to Dev Environment using NodePort') {
             steps {
                 script {
-                    sh "kubectl get pods"
-                    sh "kubectl get services"
+                    // Set up Kubernetes configuration using the specified KUBECONFIG
+                    def kubeConfig = readFile(KUBECONFIG)
+                    // Update deployment-dev.yaml to use the new image tag
+                    sh "sed -i 's|${DOCKER_IMAGE}:latest|${DOCKER_IMAGE}:${IMAGE_TAG}|' deployment.yaml"
+                    sh "kubectl apply -f deployment.yaml"
+                }
+            }
+        }
+ 
+        stage('Check Kubernetes Cluster') {
+            steps {
+                script {
+                    sh "kubectl get all"
                 }
             }
         }
